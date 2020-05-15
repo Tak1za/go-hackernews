@@ -26,7 +26,7 @@ type templateData struct {
 
 func main() {
 	tpl := template.Must(template.ParseFiles("./index.gohtml"))
-	http.HandleFunc("/", handler(35, tpl))
+	http.HandleFunc("/", handler(30, tpl))
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":3000"), nil))
 }
@@ -59,6 +59,18 @@ func getTopStories(numStories int) ([]item, error) {
 		return nil, errors.New("Failed to load top stories")
 	}
 
+	var stories []item
+	at := 0
+	for len(stories) < numStories {
+		need := numStories - len(stories)
+		stories = append(stories, getStories(ids[at:at+need])...)
+		at += need
+	}
+
+	return stories, nil
+}
+
+func getStories(ids []int) []item {
 	type result struct {
 		item item
 		err  error
@@ -66,7 +78,7 @@ func getTopStories(numStories int) ([]item, error) {
 	}
 
 	resultCh := make(chan result)
-	for i := 0; i < numStories; i++ {
+	for i := 0; i < len(ids); i++ {
 		go func(idx, id int) {
 			hnItem, err := hn.GetItem(id)
 			if err != nil {
@@ -77,7 +89,7 @@ func getTopStories(numStories int) ([]item, error) {
 	}
 
 	var results []result
-	for i := 0; i < numStories; i++ {
+	for i := 0; i < len(ids); i++ {
 		results = append(results, <-resultCh)
 	}
 
@@ -93,12 +105,9 @@ func getTopStories(numStories int) ([]item, error) {
 		if isStoryLink(res.item) {
 			stories = append(stories, res.item)
 		}
-		if len(stories) == 30 {
-			break
-		}
 	}
 
-	return stories, nil
+	return stories
 }
 
 func isStoryLink(item item) bool {
