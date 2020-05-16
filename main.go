@@ -33,10 +33,33 @@ func main() {
 }
 
 func handler(numStories int, tpl *template.Template) http.HandlerFunc {
+	sc := storyCache{
+		numStories: numStories,
+		duration:   10 * time.Second,
+	}
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for {
+			temp := storyCache{
+				numStories: numStories,
+				duration:   10 * time.Second,
+			}
+
+			temp.stories()
+
+			sc.mutex.Lock()
+			sc.cache = temp.cache
+			sc.expiration = temp.expiration
+			sc.mutex.Unlock()
+			<-ticker.C
+		}
+	}()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		storyItems, err := getCachedStories(numStories)
+		storyItems, err := sc.stories()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -54,25 +77,28 @@ func handler(numStories int, tpl *template.Template) http.HandlerFunc {
 	})
 }
 
-var (
-	cache           []item
-	cacheExpiration time.Time
-	cacheMutex      sync.Mutex
-)
+type storyCache struct {
+	numStories int
+	cache      []item
+	useA       bool
+	expiration time.Time
+	duration   time.Duration
+	mutex      sync.Mutex
+}
 
-func getCachedStories(numStories int) ([]item, error) {
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-	if time.Now().Sub(cacheExpiration) < 0 {
-		return cache, nil
+func (sc *storyCache) stories() ([]item, error) {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+	if time.Now().Sub(sc.expiration) < 0 {
+		return sc.cache, nil
 	}
-	stories, err := getTopStories(numStories)
+	stories, err := getTopStories(sc.numStories)
 	if err != nil {
 		return nil, err
 	}
-	cache = stories
-	cacheExpiration = time.Now().Add(5 * time.Minute)
-	return cache, nil
+	sc.expiration = time.Now().Add(sc.duration)
+	sc.cache = stories
+	return sc.cache, nil
 }
 
 func getTopStories(numStories int) ([]item, error) {
